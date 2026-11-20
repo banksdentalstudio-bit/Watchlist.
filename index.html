@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>200W Watchlist</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0d0d0d;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 12px;
+    line-height: 1.4;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 4px 16px;
+    border-bottom: 1px solid #222;
+    margin-bottom: 8px;
+  }
+  header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+  }
+  .refresh {
+    background: #1a1a1a;
+    color: #aaa;
+    border: 1px solid #333;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .refresh:active { background: #252525; }
+  .item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 12px;
+    padding: 14px 4px;
+    border-bottom: 1px solid #1a1a1a;
+  }
+  .ticker {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .sub {
+    font-size: 12px;
+    color: #777;
+  }
+  .price {
+    font-size: 16px;
+    font-weight: 600;
+    text-align: right;
+  }
+  .meta {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    margin-top: 2px;
+  }
+  .dist { color: #888; }
+  .dist.neg { color: #ff5252; }
+  .dist.pos { color: #69f0ae; }
+  .action {
+    font-weight: 700;
+    font-size: 12px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.3px;
+  }
+  .gen { background: #003300; color: #00ff00; }
+  .buy { background: #003d2a; color: #00e676; }
+  .prep { background: #3d3000; color: #ffc107; }
+  .none { background: #222; color: #9e9e9e; }
+  .rules {
+    margin-top: 24px;
+    padding: 12px;
+    background: #111;
+    border-radius: 10px;
+    font-size: 12px;
+    color: #888;
+  }
+  .rules strong { color: #ccc; }
+  footer {
+    text-align: center;
+    color: #444;
+    font-size: 11px;
+    margin-top: 20px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>200W Watchlist</h1>
+  <div style="text-align:right">
+    <div id="status" style="font-size:11px;color:#666;margin-bottom:4px">Loading…</div>
+    <button class="refresh" onclick="manualRefresh()">Refresh</button>
+  </div>
+</header>
+
+<div id="list"></div>
+
+<div class="rules">
+  <strong>Rules</strong><br>
+  Below 200WMA → <span style="color:#00ff00">GENERATIONAL BUY</span><br>
+  0–3.99% above → <span style="color:#00e676">BUY NOW</span><br>
+  4–7.99% above → <span style="color:#ffc107">PREPARE</span><br>
+  8%+ above → <span style="color:#9e9e9e">DO NOTHING</span>
+</div>
+
+<footer>Open on your phone · Dark mode · 200-week MA logic</footer>
+
+<script>
+// Fixed 200WMA reference levels (update these occasionally)
+const data = [
+  { ticker: "BTCUSD", name: "Bitcoin / U.S. Dollar", price: 62316, ma: 68176, gecko: "bitcoin" },
+  { ticker: "XAUUSD", name: "Gold Spot", price: 3725, ma: 3040, yahoo: "GC=F" },
+  { ticker: "SPX", name: "S&P 500 Index", price: 7323, ma: 5800, yahoo: "^GSPC" },
+  { ticker: "SILVER", name: "Silver", price: 45.09, ma: 40, yahoo: "SI=F" },
+  { ticker: "NVDA", name: "NVIDIA", price: 150.96, ma: 124, yahoo: "NVDA" },
+  { ticker: "AMZN", name: "Amazon", price: 267.74, ma: 192, yahoo: "AMZN" },
+  { ticker: "TSLA", name: "Tesla", price: 383.72, ma: 298, yahoo: "TSLA" },
+  { ticker: "META", name: "Meta", price: 616, ma: 520, yahoo: "META" },
+  { ticker: "AAPL", name: "Apple", price: 352, ma: 227, yahoo: "AAPL" },
+  { ticker: "MSFT", name: "Microsoft", price: 508, ma: 413, yahoo: "MSFT" },
+  { ticker: "QQQ", name: "Nasdaq 100", price: 660, ma: 508, yahoo: "QQQ" }
+];
+
+function getAction(dist) {
+  if (dist < 0) return { text: "GENERATIONAL BUY", cls: "gen" };
+  if (dist < 4) return { text: "BUY NOW", cls: "buy" };
+  if (dist < 8) return { text: "PREPARE", cls: "prep" };
+  return { text: "DO NOTHING", cls: "none" };
+}
+
+async function fetchPrices() {
+  // CoinGecko for BTC (no key needed)
+  try {
+    const btcRes = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd");
+    const btcJson = await btcRes.json();
+    if (btcJson.bitcoin?.usd) {
+      const btc = data.find(d => d.ticker === "BTCUSD");
+      if (btc) btc.price = btcJson.bitcoin.usd;
+    }
+  } catch (e) { console.warn("BTC fetch failed", e); }
+
+  // Yahoo Finance via CORS proxy for the rest
+  const proxy = "https://corsproxy.io/?";
+  for (const item of data) {
+    if (item.yahoo) {
+      try {
+        const url = proxy + encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${item.yahoo}?interval=1d&range=1d`);
+        const res = await fetch(url);
+        const json = await res.json();
+        const price = json.chart?.result?.[0]?.meta?.regularMarketPrice;
+        if (price) item.price = price;
+      } catch (e) {
+        console.warn(item.ticker, e);
+      }
+    }
+  }
+}
+
+function updateStatus() {
+  const now = new Date();
+  document.getElementById("status").textContent = "Updated " + now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+}
+
+async function refreshAll() {
+  document.getElementById("status").textContent = "Updating…";
+  await fetchPrices();
+  render();
+  updateStatus();
+}
+
+function manualRefresh() {
+  refreshAll();
+}
+
+async function init() {
+  render();
+  await refreshAll();
+  // Auto-refresh every 60 seconds
+  setInterval(refreshAll, 60000);
+}
+
+init();
+</script>
+
+</body>
+</html>
